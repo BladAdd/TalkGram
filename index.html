@@ -1150,8 +1150,10 @@ if (newsForm) {
 'use strict';
 
 var CONFIG = {
-  webAppUrl: 'https://app.talkgram.app',    // TODO: реальный URL веб-приложения
-  demoMode: true,                            // TODO: false, когда бэкенд готов — включатся fetch'и
+  /* веб-приложение лежит рядом с лендингом (app.html);
+     TODO: заменить на кастомный домен, когда появится свой */
+  webAppUrl: window.location.origin + window.location.pathname.replace(/[^/]*$/, '') + 'app.html',
+  demoMode: false, // приложение готово — CTA и QR ведут на app.html
   api: {
     stats:        '/api/stats',              // TODO: реальный эндпоинт
     testimonials: '/api/testimonials',       // TODO: реальный эндпоинт
