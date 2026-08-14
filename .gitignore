@@ -1,0 +1,8 @@
+# TalkGram · корневой .gitignore
+# Секреты, которые нельзя коммитить
+supabase/.db-password
+
+# Локальные инструменты
+node_modules/
+.env
+.env.local
