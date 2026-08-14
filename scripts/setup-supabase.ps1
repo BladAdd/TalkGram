@@ -1,4 +1,4 @@
-# ═══════════════════════════════════════════════════════════
+﻿# ═══════════════════════════════════════════════════════════
 # TalkGram · автоматическая настройка Supabase (одна команда)
 # ─────────────────────────────────────────────────────────────
 # 1. Создайте аккаунт: https://supabase.com (GitHub или почта)
@@ -33,7 +33,7 @@ if ($LASTEXITCODE -ne 0) { throw "Не удалось войти. Проверь
 
 # 2. Организация (создаём, если нет)
 Step "Организация..."
-$orgs = (& $Npx -y supabase orgs list --output json 2>$null | ConvertFrom-Json)
+$orgs = @(& $Npx -y supabase orgs list --output json 2>$null | ConvertFrom-Json)
 if (-not $orgs) {
   $orgOut = (& $Npx -y supabase orgs create "TalkGram") -join "`n"
   $orgId = [regex]::Match($orgOut, "([a-z0-9]{20,})").Groups[1].Value
@@ -47,11 +47,19 @@ if (-not $orgs) {
 # 3. Проект (БД)
 Step "Создание проекта '$ProjectName' ($Region)..."
 $dbPass = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
-$projOut = (& $Npx -y supabase projects create $ProjectName --org-id $orgId --db-password $dbPass --region $Region) -join "`n"
-$ref = [regex]::Match($projOut, "https://([a-z0-9]+)\.supabase\.co").Groups[1].Value
-if (-not $ref) { $ref = [regex]::Match($projOut, "Created a new project (\w+)").Groups[1].Value }
-if (-not $ref) { throw "Не удалось распознать реф проекта: $projOut" }
+$projRaw = (& $Npx -y supabase projects create $ProjectName --org-id $orgId --db-password $dbPass --region $Region 2>$null | Out-String)
+$projJson = $null
+try { $projJson = $projRaw | ConvertFrom-Json } catch {}
+$ref = ""
+if ($projJson) { $ref = $projJson.ref } 
+if (-not $ref) { $ref = [regex]::Match($projRaw, "https://([a-z0-9]+)\.supabase\.co").Groups[1].Value }
+if (-not $ref) { $ref = [regex]::Match($projRaw, "Created a new project (\w+)").Groups[1].Value }
+if (-not $ref) { throw "Не удалось распознать реф проекта: $projRaw" }
 Write-Host "Проект: $ref"
+
+# Пароль сохраняем сразу же, как только проект создан (иначе его будет не восстановить)
+[System.IO.File]::WriteAllText((Join-Path $Root "supabase\.db-password"), $dbPass, (New-Object System.Text.UTF8Encoding($false)))
+Write-Host "Пароль БД сохранён в supabase/.db-password"
 
 # 4. Линковка + миграции (проект поднимается 1–2 минуты — ретраим)
 Step "Применение схемы (может занять 1–2 минуты)..."

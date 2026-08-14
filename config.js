@@ -1,18 +1,13 @@
 /* ═══════════════════════════════════════════════════════════
    TalkGram · конфигурация бэкенда (Supabase)
    ─────────────────────────────────────────────────────────────
-   ШАГ 1. Создайте бесплатный проект: https://supabase.com → New project
-   ШАГ 2. Project Settings → API → скопируйте "Project URL" и "anon public" key
-   ШАГ 3. Вставьте их ниже (между кавычками) и сохраните файл
-   ШАГ 4. В Supabase Dashboard → SQL Editor выполните весь файл
-          supabase/schema.sql (создаст таблицы, RLS и realtime)
-   ШАГ 5. Authentication → Providers → Email:
-          для мгновенного входа без письма отключите "Confirm email"
-          (для продакшена подтверждение лучше оставить включённым)
+   Проект: talkgram (eu-central-1), ref: urnlupdblobqunoqtqsg
+   Схема применена: supabase/migrations/0001_init.sql
+   Пароль БД хранится в supabase/.db-password (в git не коммитится)
    ═══════════════════════════════════════════════════════════ */
 window.SUPABASE_CONFIG = {
-  url: '',     // пример: 'https://abcdefghijkl.supabase.co'
-  anonKey: '', // пример: 'eyJhbGciOiJIUzI1NiIs...' (публичный anon-ключ)
+  url: 'https://urnlupdblobqunoqtqsg.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVybmx1cGRibG9icXVub3F0cXNnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2ODYyMzYsImV4cCI6MjEwMjI2MjIzNn0.d9qqaiwctV_ud16YGeu_5zCXF1VugB7iiW0dMSheN90',
 
   /* TURN-серверы для звонков между разными сетями (через NAT).
      Пока пусто — звонки работают в пределах одной сети (STUN).
