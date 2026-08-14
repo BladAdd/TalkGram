@@ -291,7 +291,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
     </div>
     <div class="search-box">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-      <input type="search" id="user-search" placeholder="Найти собеседника по нику…" autocomplete="off">
+      <input type="search" id="user-search" placeholder="Найти собеседника по нику…" autocomplete="off" aria-label="Поиск собеседника — нажмите, чтобы увидеть всех">
     </div>
     <div id="search-results" aria-live="polite"></div>
     <div class="chat-list-title">Чаты</div>
@@ -527,6 +527,7 @@ async function enterApp(session){
   initPresence();
   loadProfiles();
   await loadChats();
+  showUsers('');
 }
 
 function leaveApp(){
@@ -678,41 +679,53 @@ function renderChatList(chats){
 
 /* ── 8. Поиск собеседников ── */
 var searchTimer = null;
-$('#user-search').addEventListener('input', function(){
-  var q = this.value.trim().toLowerCase();
+function showUsers(q){
   var box = $('#search-results');
-  clearTimeout(searchTimer);
-  if (!q) { box.innerHTML = ''; box.classList.remove('is-open'); return; }
-  searchTimer = setTimeout(function(){
-    sb.from('profiles').select('id, username')
+  box.innerHTML = '';
+  var p;
+  if (q) {
+    p = sb.from('profiles').select('id, username')
       .neq('id', me.id)
       .or('username.ilike.%' + q + '%,full_name.ilike.%' + q + '%')
-      .limit(8)
-      .then(function(res){
+      .limit(8);
+  } else {
+    p = sb.from('profiles').select('id, username')
+      .neq('id', me.id)
+      .limit(20);
+  }
+  p.then(function(res){
+    if (res.error) return;
+    box.innerHTML = '';
+    if (!res.data.length) box.appendChild(mk('p', 'search-empty', q ? 'Никого не нашли 😔' : 'Пока никого нет — поделитесь ссылкой с другом'));
+    res.data.forEach(function(p){
+      profilesCache[p.id] = p;
+      var row = mk('div', 'chat-row');
+      var av = mk('span', 'avatar');
+      setAvatar(av, p.id, p.username);
+      var info = mk('span', 'chat-row-info');
+      info.appendChild(mk('b', null, p.username));
+      info.appendChild(mk('span', null, 'начните переписку'));
+      row.appendChild(av);
+      row.appendChild(info);
+      row.addEventListener('click', function(){
         box.innerHTML = '';
-        if (res.error) return;
-        if (!res.data.length) box.appendChild(mk('p', 'search-empty', 'Никого не нашли 😔'));
-        res.data.forEach(function(p){
-          profilesCache[p.id] = p;
-          var row = mk('div', 'chat-row');
-          var av = mk('span', 'avatar');
-          setAvatar(av, p.id, p.username);
-          var info = mk('span', 'chat-row-info');
-          info.appendChild(mk('b', null, p.username));
-          info.appendChild(mk('span', null, 'начните переписку'));
-          row.appendChild(av);
-          row.appendChild(info);
-          row.addEventListener('click', function(){
-            box.innerHTML = '';
-            box.classList.remove('is-open');
-            $('#user-search').value = '';
-            openChat(p.id);
-          });
-          box.appendChild(row);
-        });
-        box.classList.add('is-open');
+        box.classList.remove('is-open');
+        $('#user-search').value = '';
+        openChat(p.id);
       });
-  }, 300);
+      box.appendChild(row);
+    });
+    box.classList.add('is-open');
+  });
+}
+$('#user-search').addEventListener('focus', function(){
+  if (!this.value.trim()) showUsers('');
+});
+$('#user-search').addEventListener('input', function(){
+  var q = this.value.trim().toLowerCase();
+  clearTimeout(searchTimer);
+  if (!q) { showUsers(''); return; }
+  searchTimer = setTimeout(function(){ showUsers(q); }, 300);
 });
 
 /* ── 9. Открытый чат ── */
