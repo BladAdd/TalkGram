@@ -264,9 +264,9 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
         <input type="email" id="auth-email" required placeholder="you@gmail.com" autocomplete="email" spellcheck="false">
       </label>
       <label class="field hidden" data-auth-f="username">
-        <span>Никнейм</span>
-        <input type="text" id="auth-username" placeholder="например, neon_sky" autocomplete="username" spellcheck="false">
-        <small>3–20 символов: латиница, цифры, подчёркивание</small>
+        <span>Никнейм <em style="opacity:.55;font-style:normal">— необязательно</em></span>
+        <input type="text" id="auth-username" placeholder="например, neon_sky (можно не заполнять)" autocomplete="username" spellcheck="false">
+        <small>Если не заполнить, создастся автоматически</small>
       </label>
       <label class="field">
         <span>Пароль</span>
@@ -469,12 +469,16 @@ $('#auth-form').addEventListener('submit', function(ev){
   var p;
   if (authMode === 'signup') {
     var username = $('#auth-username').value.trim().toLowerCase();
-    if (!/^[a-z0-9_]{3,20}$/.test(username)) {
-      btn.disabled = false;
-      authNote('Никнейм: 3–20 символов, только латиница, цифры и _');
-      return;
+    var meta = {};
+    if (username) {
+      if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+        btn.disabled = false;
+        authNote('Никнейм: 3–20 символов, только латиница, цифры и _');
+        return;
+      }
+      meta.username = username;
     }
-    p = sb.auth.signUp({ email: email, password: pass, options: { data: { username: username } } });
+    p = sb.auth.signUp({ email: email, password: pass, options: { data: meta } });
   } else {
     p = sb.auth.signInWithPassword({ email: email, password: pass });
   }
@@ -485,6 +489,8 @@ $('#auth-form').addEventListener('submit', function(ev){
       // включено подтверждение почты — ждём клик по письму
       authNote('Письмо со ссылкой отправлено на ' + email + '. Откройте его — аккаунт активируется.', true);
       // TODO: автоматический вход после подтверждения почты (пока — повторный вход)
+    } else {
+      authNote('Входим…', true);
     }
   }).catch(function(err){ btn.disabled = false; authNote(err.message); });
 });
@@ -549,17 +555,11 @@ function leaveApp(){
 
 $('#logout-btn').addEventListener('click', function(){ sb.auth.signOut(); });
 
-/* ── 5. Realtime: сообщения + сигналинг звонков ── */
+/* ── 5. Realtime: сообщения (broadcast) + сигналинг звонков ── */
 function initRealtime(){
-  /* входящие и исходящие сообщения (RLS пропускает только участников диалога) */
-  sb.channel('inbox:' + me.id)
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'recipient_id=eq.' + me.id }, onMessageInsert)
-    .subscribe();
-  sb.channel('outbox:' + me.id)
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: 'sender_id=eq.' + me.id }, onMessageInsert)
-    .subscribe();
-  /* персональный канал сигналинга звонков */
+  /* персональный канал: входящие сообщения + сигналинг звонков */
   sb.channel('ring:' + me.id)
+    .on('broadcast', { event: 'msg' }, onMsgBroadcast)
     .on('broadcast', { event: 'call-offer' }, onCallOffer)
     .on('broadcast', { event: 'call-answer' }, onCallAnswer)
     .on('broadcast', { event: 'ice' }, onIce)
@@ -568,20 +568,30 @@ function initRealtime(){
     .subscribe();
 }
 
+/* отправка broadcast-события собеседнику: канал подписываем один раз,
+   неотправленные сообщения копим в очередь до готовности канала */
 function sendSignal(peerId, event, payload){
   var key = 'ring:' + peerId;
   var ch = signalChannels[key];
-  if (!ch) { ch = sb.channel(key); signalChannels[key] = ch; }
-  ch.subscribe(function(status){
-    if (status === 'SUBSCRIBED') ch.send({ type: 'broadcast', event: event, payload: payload });
-  });
+  if (!ch) {
+    ch = sb.channel(key);
+    ch._queue = [];
+    signalChannels[key] = ch;
+    ch.subscribe(function(status){
+      if (status === 'SUBSCRIBED') {
+        ch._queue.forEach(function(m){ ch.send(m); });
+        ch._queue.length = 0;
+      }
+    });
+  }
+  var msg = { type: 'broadcast', event: event, payload: payload };
+  if (ch.state === 'subscribed') ch.send(msg);
+  else ch._queue.push(msg);
 }
 
-function onMessageInsert(payload){
-  var m = payload.new;
-  if (seenMsgIds.has(m.id)) return;
-  seenMsgIds.add(m.id);
-  appendMessage(m);
+function onMsgBroadcast(payload){
+  if (!payload || !payload.id) return;
+  appendMessage(payload);
 }
 
 /* ── 6. Присутствие (кто в сети) ── */
@@ -640,8 +650,9 @@ async function loadChats(){
     if (!byPeer[peer]) byPeer[peer] = { last: m, unread: 0 };
     else if (new Date(m.created_at) > new Date(byPeer[peer].last.created_at)) byPeer[peer].last = m;
     if (m.recipient_id === me.id && !m.read_at) byPeer[peer].unread++;
-    if (!messagesByPeer[peer]) messagesByPeer[peer] = [];
-    messagesByPeer[peer].push(m);
+    var arr = messagesByPeer[peer];
+    if (!arr) { messagesByPeer[peer] = [m]; }
+    else if (!arr.some(function(x){ return x.id === m.id; })) { arr.push(m); }
   });
   var chats = Object.keys(byPeer).map(function(id){
     return { peerId: id, last: byPeer[id].last, unread: byPeer[id].unread };
@@ -734,7 +745,7 @@ async function openChat(peerId){
   $('#chat-empty').classList.add('hidden');
   $('#chat-open').classList.remove('hidden');
   renderChatHeader(peerId);
-  renderChatList(); /* подсветка активного */
+  loadChats(); /* обновляем список и подсветку активного чата */
   if (window.innerWidth <= 760) document.body.classList.remove('show-list');
   await markRead(peerId);
   renderMessages(peerId);
@@ -776,6 +787,8 @@ function buildBubble(m){
 }
 
 function appendMessage(m){
+  if (seenMsgIds.has(m.id)) return;
+  seenMsgIds.add(m.id);
   var peer = m.sender_id === me.id ? m.recipient_id : m.sender_id;
   if (!messagesByPeer[peer]) messagesByPeer[peer] = [];
   messagesByPeer[peer].push(m);
@@ -808,21 +821,36 @@ $('#composer').addEventListener('submit', function(ev){
   var input = $('#message-input');
   var text = input.value.trim();
   if (!text) return;
-  sb.from('messages').insert({ sender_id: me.id, recipient_id: activePeerId, content: text }).then(function(res){
-    if (res.error) { toast('Не отправлено: ' + res.error.message, 'err'); return; }
-    input.value = '';
-    /* вставку подхватит realtime (outbox) — сообщение появится само */
-  });
+  var btn = this.querySelector('button[type="submit"]');
+  btn.disabled = true;
+  sb.from('messages').insert({ sender_id: me.id, recipient_id: activePeerId, content: text })
+    .select('id, sender_id, recipient_id, content, created_at, read_at')
+    .single()
+    .then(function(res){
+      btn.disabled = false;
+      if (res.error) { toast('Не отправлено: ' + res.error.message, 'err'); return; }
+      input.value = '';
+      appendMessage(res.data);            /* показываем у себя мгновенно */
+      sendSignal(activePeerId, 'msg', res.data); /* собеседнику — через broadcast */
+    }).catch(function(err){
+      btn.disabled = false;
+      toast('Не отправлено: ' + err.message, 'err');
+    });
 });
 
 /* ── 10. Звонки (WebRTC) ── */
 var RTC_CFG = {
-  iceServers: [{ urls: ['stun:stun.l.google.com:19302'] }].concat(CFG.turnServers || [])
+  iceServers: [
+    { urls: ['stun:stun.l.google.com:19302'] },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+  ].concat(CFG.turnServers || [])
 };
 var RING_TIMEOUT = 30000;
 
 function startCall(peerId, type){
-  if (!presence[peerId]) { toast('Собеседник сейчас не в сети', 'err'); return; }
+  if (!presence[peerId]) toast('Собеседник не в сети — звонок пройдёт, только если он откроет приложение');
   // TODO: офлайн-вызовы (push-уведомления) — пока только приглашение в момент звонка
   if (call) { toast('Сначала завершите текущий звонок'); return; }
   call = { mode: 'outgoing', type: type, peerId: peerId, pc: null, localStream: null, remoteStream: null, timer: null, ringTimer: null };
